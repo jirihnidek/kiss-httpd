@@ -1,7 +1,11 @@
 # KISS HTTPD Linux Daemon
 
-This repository contains simple example of httpd daemon for Linux OS.
-This repository also contains examples of starting scripts. 
+This repository contains simple example of web server for Linux OS.
+This repository also contains examples of starting scripts. By default this
+web server listen at port 8080.
+
+> Note: Keep in mind that this server was coded for teaching purpose and
+it is not intended for production!
 
 ## Requirements
 
@@ -34,13 +38,14 @@ have a look at command line parameters and arguments
     Usage: ./bin/kiss-httpd [OPTIONS]
 
      Options:
-      -h --help                 Print this help
-      -c --conf_file filename   Read configuration from the file
-      -t --test_conf filename   Test configuration file
-      -l --log_file  filename   Write logs to the file
-      -d --daemon               Daemonize this application
-      -p --pid_file  filename   PID file used by daemonized app
-      -f --file_html filename   HTML file
+      -h --help                   Print this help
+      -c --conf_file   filename   Read configuration from the file
+      -t --test_conf   filename   Test configuration file
+      -l --log_file    filename   Write logs to the file
+      -d --daemon                 Daemonize this application
+      -p --pid_file    filename   PID file used by daemonized app
+      -f --file_html   filename   HTML file
+      -n --port_number number     Port number (default 8080)
 
 When you will run `./bin/kiss-httpd` with parameter `--daemon` or `-d`, then
 it will become real UNIX daemon. But this is not the way, how UNIX daemons

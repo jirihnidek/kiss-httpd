@@ -38,7 +38,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-#define PORT 8081
+#define DEFAULT_PORT 8080
 #define BUF_SIZE 65536
 #define HTTP_200_RESPONSE_HEADER "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n\r\n"
 #define DEFAULT_HTML_PAGE "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<!doctype html>\r\n<html lang=\"en\">\r\n<head>\r\n<title>KISS Httpd Test Page</title>\r\n</head>\r\n<body><h1>KISS Httpd Test Page</h1><p>KISS is in this case acronym: Keep It Simple, Stupid!</p></body></html>"
@@ -55,6 +55,7 @@ static char *html_file_name = NULL;
 static char *log_file_name = NULL;
 static char *html_page = NULL;
 static unsigned int html_page_size = 0;
+static unsigned short port = DEFAULT_PORT;
 
 /**
  * \brief Read configuration from config file
@@ -241,13 +242,14 @@ void print_help(void)
 {
 	printf("\n Usage: %s [OPTIONS]\n\n", app_name);
 	printf("  Options:\n");
-	printf("   -h --help                 Print this help\n");
-	printf("   -c --conf_file filename   Read configuration from the file\n");
-	printf("   -t --test_conf filename   Test configuration file\n");
-	printf("   -l --log_file  filename   Write logs to the file\n");
-	printf("   -d --daemon               Daemonize this application\n");
-	printf("   -p --pid_file  filename   PID file used by daemonized app\n");
-	printf("   -f --file_html filename   HTML file\n");
+	printf("   -h --help                   Print this help\n");
+	printf("   -c --conf_file   filename   Read configuration from the file\n");
+	printf("   -t --test_conf   filename   Test configuration file\n");
+	printf("   -l --log_file    filename   Write logs to the file\n");
+	printf("   -d --daemon                 Daemonize this application\n");
+	printf("   -p --pid_file    filename   PID file used by daemonized app\n");
+	printf("   -f --file_html   filename   HTML file\n");
+	printf("   -n --port_number number     Port numbber (default is 8080)");
 	printf("\n");
 }
 
@@ -349,15 +351,23 @@ int main_httpd_loop(void)
     flag = fcntl(listen_sock_fd, F_GETFL, 0);
     fcntl(listen_sock_fd, F_SETFL, flag | O_NONBLOCK);
 
+    flag = 1;
+    ret = setsockopt(listen_sock_fd, SOL_SOCKET, SO_REUSEADDR, &flag, sizeof(flag));
+    if(ret < 0) {
+		syslog(LOG_ERR, "setsockopt(%d, SO_REUSEADDR) failed: %s",
+				listen_sock_fd, strerror(errno));
+		return 0;
+    }
+
 	server_address.sin6_family = AF_INET6;
 	server_address.sin6_addr = in6addr_any;
-	server_address.sin6_port = htons(PORT);
+	server_address.sin6_port = htons(port);
 
 	ret = bind(listen_sock_fd, (struct sockaddr *)&server_address,
 			sizeof(server_address));
 	if(ret != 0) {
 		syslog(LOG_ERR, "Can not bind() socket: %d to address: [::1]:%d, error: %s",
-				listen_sock_fd, PORT, strerror(errno));
+				listen_sock_fd, port, strerror(errno));
 		return 0;
 	}
 
@@ -447,6 +457,7 @@ int main(int argc, char *argv[])
 		{"daemon", no_argument, 0, 'd'},
 		{"pid_file", required_argument, 0, 'p'},
 		{"file_html", required_argument, 0, 'f'},
+		{"port_number", required_argument, 0, 'n'},
 		{NULL, 0, 0, 0}
 	};
 	int value, option_index = 0;
@@ -455,7 +466,7 @@ int main(int argc, char *argv[])
 	app_name = argv[0];
 
 	/* Try to process all command line arguments */
-	while( (value = getopt_long(argc, argv, "c:l:t:p:f:dh", long_options, &option_index)) != -1) {
+	while( (value = getopt_long(argc, argv, "c:l:t:p:f:n:dh", long_options, &option_index)) != -1) {
 		switch(value) {
 			case 'c':
 				conf_file_name = strdup(optarg);
@@ -473,6 +484,9 @@ int main(int argc, char *argv[])
 				break;
 			case 'f':
 				html_file_name = strdup(optarg);
+				break;
+			case 'n':
+				sscanf(optarg, "%hu", &port);
 				break;
 			case 'h':
 				print_help();
