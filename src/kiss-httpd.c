@@ -56,6 +56,7 @@ static char *log_file_name = NULL;
 static char *html_page = NULL;
 static unsigned int html_page_size = 0;
 static unsigned short port = DEFAULT_PORT;
+static char *mode = NULL;
 
 /**
  * \brief Read configuration from config file
@@ -250,6 +251,7 @@ void print_help(void)
 	printf("   -p --pid_file    filename   PID file used by daemonized app\n");
 	printf("   -f --file_html   filename   HTML file\n");
 	printf("   -n --port_number number     Port numbber (default is 8080)");
+	printf("   -m --mode        mode       select/forking (default select)");
 	printf("\n");
 }
 
@@ -333,7 +335,90 @@ int read_html_file(int reload)
 	return buf_pos;
 }
 
-int main_httpd_loop(void)
+int main_httpd_loop_forking()
+{
+	int listen_sock_fd, conn_sock_fd = -1;
+	struct sockaddr_in6 server_address;
+	struct sockaddr_in6 client_address;
+	unsigned int len = sizeof(client_address);
+	char str_addr[INET6_ADDRSTRLEN];
+	char buffer[BUF_SIZE];
+	int ret, flag;
+
+	listen_sock_fd = socket(AF_INET6, SOCK_STREAM, IPPROTO_TCP);
+
+    flag = 1;
+    ret = setsockopt(listen_sock_fd, SOL_SOCKET, SO_REUSEADDR, &flag, sizeof(flag));
+    if(ret < 0) {
+		syslog(LOG_ERR, "setsockopt(%d, SO_REUSEADDR) failed: %s",
+				listen_sock_fd, strerror(errno));
+		return 0;
+    }
+
+	server_address.sin6_family = AF_INET6;
+	server_address.sin6_addr = in6addr_any;
+	server_address.sin6_port = htons(port);
+
+	ret = bind(listen_sock_fd, (struct sockaddr *)&server_address,
+			sizeof(server_address));
+	if(ret != 0) {
+		syslog(LOG_ERR, "Can not bind() socket: %d to address: [::1]:%d, error: %s",
+				listen_sock_fd, port, strerror(errno));
+		return 0;
+	}
+
+	ret = listen(listen_sock_fd, queue_len);
+	if(ret != 0) {
+		syslog(LOG_ERR, "Can not listen() on socket: %d queu_len: %d, error: %s",
+				listen_sock_fd, queue_len, strerror(errno));
+		return 0;
+	}
+
+	/* This global variable can be changed in function handling signal */
+	running = 1;
+
+	/* Never ending loop of server */
+	while(running == 1) {
+		/* Debug print */
+		/* fprintf(log_stream, "Server waiting\n");*/
+
+		conn_sock_fd = accept(listen_sock_fd,
+				(struct sockaddr*)&client_address, &len);
+		if(conn_sock_fd == -1) {
+			perror("accept()");
+			return 0;
+		}
+		inet_ntop(AF_INET6, &client_address.sin6_addr,
+				str_addr, sizeof(client_address));
+		fprintf(log_stream, "New connection from: %s:%d\n",
+				str_addr, ntohs(client_address.sin6_port));
+		if(fork() == 0) {
+			int num_read = read(conn_sock_fd, buffer, BUF_SIZE);
+			buffer[num_read] = '\0';
+			/* fprintf(log_stream, "Received: %s\n", buffer); */
+			ret = parse_http_request(buffer, num_read);
+			if(ret == 1) {
+				if(html_page == NULL) {
+					write(conn_sock_fd, DEFAULT_HTML_PAGE,
+							strlen(DEFAULT_HTML_PAGE));
+				} else {
+					write(conn_sock_fd, html_page, html_page_size);
+				}
+			} else {
+				write(conn_sock_fd, ERROR_404_PAGE,
+						strlen(ERROR_404_PAGE));
+			}
+			close(conn_sock_fd);
+			exit(EXIT_SUCCESS);
+		} else {
+			close(conn_sock_fd);
+		}
+	}
+
+	return 1;
+}
+
+int main_httpd_loop_select(void)
 {
 	int listen_sock_fd, conn_sock_fd = -1;
 	struct sockaddr_in6 server_address;
@@ -418,22 +503,22 @@ int main_httpd_loop(void)
 					    fcntl(conn_sock_fd, F_SETFL, flag | O_NONBLOCK);
 						FD_SET(conn_sock_fd, &set);
 					} else {
-						int num_read = read(conn_sock_fd, buffer, BUF_SIZE);
+						int num_read = read(sock_fd, buffer, BUF_SIZE);
 						buffer[num_read] = '\0';
 						/* fprintf(log_stream, "Received: %s\n", buffer); */
 						ret = parse_http_request(buffer, num_read);
 						if(ret == 1) {
 							if(html_page == NULL) {
-								write(conn_sock_fd, DEFAULT_HTML_PAGE,
+								write(sock_fd, DEFAULT_HTML_PAGE,
 										strlen(DEFAULT_HTML_PAGE));
 							} else {
-								write(conn_sock_fd, html_page, html_page_size);
+								write(sock_fd, html_page, html_page_size);
 							}
 						} else {
-							write(conn_sock_fd, ERROR_404_PAGE,
+							write(sock_fd, ERROR_404_PAGE,
 									strlen(ERROR_404_PAGE));
 						}
-						close(conn_sock_fd);
+						close(sock_fd);
 						FD_CLR(sock_fd, &set);
 					}
 				}
@@ -444,6 +529,15 @@ int main_httpd_loop(void)
 	}
 
 	return 1;
+}
+
+int main_httpd_loop(int forking)
+{
+	if(forking == 1) {
+		return main_httpd_loop_forking();
+	} else {
+		return main_httpd_loop_select();
+	}
 }
 
 /* Main function */
@@ -458,6 +552,7 @@ int main(int argc, char *argv[])
 		{"pid_file", required_argument, 0, 'p'},
 		{"file_html", required_argument, 0, 'f'},
 		{"port_number", required_argument, 0, 'n'},
+		{"mode", required_argument, 0, 'm'},
 		{NULL, 0, 0, 0}
 	};
 	int value, option_index = 0;
@@ -466,7 +561,7 @@ int main(int argc, char *argv[])
 	app_name = argv[0];
 
 	/* Try to process all command line arguments */
-	while( (value = getopt_long(argc, argv, "c:l:t:p:f:n:dh", long_options, &option_index)) != -1) {
+	while( (value = getopt_long(argc, argv, "c:l:t:p:f:n:m:dh", long_options, &option_index)) != -1) {
 		switch(value) {
 			case 'c':
 				conf_file_name = strdup(optarg);
@@ -487,6 +582,9 @@ int main(int argc, char *argv[])
 				break;
 			case 'n':
 				sscanf(optarg, "%hu", &port);
+				break;
+			case 'm':
+				mode = strdup(optarg);
 				break;
 			case 'h':
 				print_help();
@@ -537,7 +635,13 @@ int main(int argc, char *argv[])
 	/* printf("HTML page (%s): \n%s\n", html_file_name, html_page); */
 
 	/* Start main loop of this server */
-	main_httpd_loop();
+	if(mode == NULL || strcmp(mode, "select") == 0) {
+		main_httpd_loop(0);
+	} else if(mode != NULL && strcmp(mode, "forking") == 0) {
+		main_httpd_loop(1);
+	} else {
+		main_httpd_loop(0);
+	}
 
 	/* Close log file, when it is used. */
 	if (log_stream != stdout)
