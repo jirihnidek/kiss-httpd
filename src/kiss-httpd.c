@@ -250,8 +250,8 @@ void print_help(void)
 	printf("   -d --daemon                 Daemonize this application\n");
 	printf("   -p --pid_file    filename   PID file used by daemonized app\n");
 	printf("   -f --file_html   filename   HTML file\n");
-	printf("   -n --port_number number     Port numbber (default is 8080)");
-	printf("   -m --mode        mode       select/forking (default select)");
+	printf("   -n --port_number number     Port numbber (default is 8080)\n");
+	printf("   -m --mode        mode       select/forking (default select)\n");
 	printf("\n");
 }
 
